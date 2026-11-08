@@ -9,6 +9,8 @@ a file's syntax, schema or variable interpolation fails CI.
 
 - Each directory's base file (`compose.yaml`, `docker-compose.yml`, ...) is
   checked as a project, which picks up any `*override*` file beside it.
+- Files under `.github/` are skipped, so a workflow named `compose.yml` is
+  not mistaken for one.
 - Other Compose files are checked on their own, or as an overlay on the base
   file if they don't stand alone.
 - Every tracked `.env.example` is copied to `.env` first, standing in for the

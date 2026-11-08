@@ -30,7 +30,7 @@ jobs:
 
           failed=0
 
-          mapfile -t files < <(git ls-files | grep -Ev '(^|/)node_modules/' | grep -E '(^|/)(docker-)?compose[^/]*\.ya?ml$' | sort)
+          mapfile -t files < <(git ls-files | grep -Ev '(^|/)node_modules/|^\.github/' | grep -E '(^|/)(docker-)?compose[^/]*\.ya?ml$' | sort)
 
           if [ ${#files[@]} -eq 0 ]; then
             echo "No Compose files found"
