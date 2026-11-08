@@ -1,0 +1,92 @@
+# Reusable workflow: validate every Compose file with `docker compose config`.
+#
+# Call it from another repo with:
+#
+#   jobs:
+#     compose:
+#       uses: tkightly/shared-workflows/.github/workflows/compose-config.yml@v1
+name: Compose config
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-config:
+    name: Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate Compose files
+        shell: bash
+        run: |
+          # Validate every Compose file in the repo with `docker compose config`.
+          # Base files are checked as a project (picking up any override file);
+          # other files are checked standalone, or as an overlay on the base file.
+          set -uo pipefail
+
+          failed=0
+
+          mapfile -t files < <(git ls-files | grep -Ev '(^|/)node_modules/' | grep -E '(^|/)(docker-)?compose[^/]*\.ya?ml$' | sort)
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No Compose files found"
+            exit 0
+          fi
+
+          # Secrets live in an untracked .env; stand in for it with the example file.
+          prepare_env() {
+            local dir=$1
+            if [ ! -e "$dir/.env" ]; then
+              if [ -e "$dir/.env.example" ]; then
+                cp "$dir/.env.example" "$dir/.env"
+              else
+                touch "$dir/.env"
+              fi
+            fi
+          }
+
+          # Compose files can point env_file at other directories, so cover every
+          # example file, not just the ones next to a Compose file.
+          for example in $(git ls-files | grep -Ev '(^|/)node_modules/' | grep -E '(^|/)\.env\.example$'); do
+            prepare_env "$(dirname "$example")"
+          done
+
+          for dir in $(printf '%s\n' "${files[@]}" | xargs -n1 dirname | sort -u); do
+            prepare_env "$dir"
+            base=""
+            for f in compose.yaml compose.yml docker-compose.yaml docker-compose.yml; do
+              if [ -e "$dir/$f" ]; then base=$f; break; fi
+            done
+
+            if [ -n "$base" ]; then
+              if (cd "$dir" && docker compose config -q >/dev/null 2>&1); then
+                echo "ok    $dir/$base"
+              else
+                echo "FAIL  $dir/$base"
+                (cd "$dir" && docker compose config -q 2>&1 | sed 's/^/      /')
+                failed=1
+              fi
+            fi
+
+            for path in "${files[@]}"; do
+              [ "$(dirname "$path")" = "$dir" ] || continue
+              f=$(basename "$path")
+              [ "$f" = "$base" ] && continue
+              case $f in *override*) [ -n "$base" ] && continue ;; esac
+              if (cd "$dir" && docker compose -f "$f" config -q >/dev/null 2>&1); then
+                echo "ok    $path"
+              elif [ -n "$base" ] && (cd "$dir" && docker compose -f "$base" -f "$f" config -q >/dev/null 2>&1); then
+                echo "ok    $path (overlay on $base)"
+              else
+                echo "FAIL  $path"
+                (cd "$dir" && docker compose -f "$f" config -q 2>&1 | sed 's/^/      /')
+                failed=1
+              fi
+            done
+          done
+
+          exit $failed
