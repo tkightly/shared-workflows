@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   compose:
-    uses: tkightly/shared-workflows/.github/workflows/compose-config.yml@v1
+    uses: tkightly/shared-workflows/.github/workflows/compose-config.yml@v1.1.0
 ```
 
 ## playwright
@@ -74,7 +74,7 @@ on:
 
 jobs:
   e2e:
-    uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1
+    uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1.1.0
     permissions:
       contents: write
       statuses: write
@@ -130,7 +130,7 @@ on:
 
 jobs:
   image:
-    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1
+    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1.1.0
     permissions:
       contents: read
       packages: write
@@ -147,7 +147,7 @@ jobs:
           - { image: movie-tracker-api, context: backend }
           - { image: movie-tracker-web, context: web }
           - { image: movie-tracker-migrate, dockerfile: deploy/migrate/Dockerfile }
-    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1
+    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1.1.0
     permissions:
       contents: read
       packages: write
@@ -162,5 +162,12 @@ Then in the server's Compose file, replace `build:` with
 classic token with only `read:packages`, as a `ghcr.io` registry in Arcane or
 via `docker login ghcr.io`.
 
-Callers pin `@v1`. Move the `v1` tag forward for compatible changes; cut `v2`
-for anything that could start failing repos that pass today.
+## Versions
+
+Releases are semver tags (`v1.2.3`), and a tag is never moved or deleted once
+pushed, so a caller's pin always means the same code. Callers pin an exact
+version. Bump the patch for fixes, the minor for new workflows or inputs, and
+the major for anything that could start failing repos that pass today.
+
+`v1` is an older floating tag, frozen at `v1.0.0`. Repos still on it keep
+working; move them to an exact version when they're next touched.
