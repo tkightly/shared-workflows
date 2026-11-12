@@ -5,7 +5,7 @@
 #
 #   jobs:
 #     e2e:
-#       uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1
+#       uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1.1.0
 #       permissions:
 #         contents: write
 #         statuses: write

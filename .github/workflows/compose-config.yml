@@ -4,7 +4,7 @@
 #
 #   jobs:
 #     compose:
-#       uses: tkightly/shared-workflows/.github/workflows/compose-config.yml@v1
+#       uses: tkightly/shared-workflows/.github/workflows/compose-config.yml@v1.1.0
 name: Compose config
 
 on:
