@@ -115,6 +115,7 @@ The calling job needs `packages: write`.
 | `target` | last stage | |
 | `build-args` | `""` | One `KEY=value` per line |
 | `platforms` | `linux/amd64` | Anything else sets up QEMU, which is much slower |
+| `scan` | `false` | Scan with Trivy before pushing; fails on any HIGH or CRITICAL vulnerability, fixed or not. Single platform only |
 | `timeout-minutes` | `30` | |
 
 Outputs `image` (without a tag) and `digest`.

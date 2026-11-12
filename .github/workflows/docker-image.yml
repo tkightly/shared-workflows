@@ -43,6 +43,12 @@ on:
         description: Comma-separated platforms, e.g. linux/amd64,linux/arm64.
         type: string
         default: linux/amd64
+      scan:
+        description: >-
+          Scan the image with Trivy before pushing it, failing on any HIGH or
+          CRITICAL vulnerability, fixed or not. Single-platform builds only.
+        type: boolean
+        default: false
       timeout-minutes:
         type: number
         default: 30
@@ -113,6 +119,30 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build for scanning
+        if: inputs.scan
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          build-args: ${{ inputs.build-args }}
+          platforms: ${{ inputs.platforms }}
+          # Into the local Docker daemon, where Trivy can read it. The build
+          # below then reuses every layer, so the image is only built once.
+          load: true
+          tags: ${{ steps.name.outputs.image }}:scan
+          cache-from: type=gha,scope=${{ steps.name.outputs.image }}
+
+      - name: Trivy
+        if: inputs.scan
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}:scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.76.1 image --severity HIGH,CRITICAL --exit-code 1 --no-progress \
+            "$IMAGE"
 
       - id: build
         uses: docker/build-push-action@v7
