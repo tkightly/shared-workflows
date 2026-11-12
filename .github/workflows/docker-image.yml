@@ -1,0 +1,133 @@
+# Reusable workflow: build a Docker image and push it to GHCR, so servers
+# only pull images instead of building them.
+#
+# Call it from another repo with:
+#
+#   jobs:
+#     image:
+#       uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1
+#       permissions:
+#         contents: read
+#         packages: write
+#       with:
+#         image: my-app-api
+#         context: backend
+name: Docker image
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: >-
+          Image name under ghcr.io/<owner>/. Defaults to the repo's name; set it
+          for repos that build more than one image.
+        type: string
+        default: ""
+      context:
+        description: Build context, relative to the repo root.
+        type: string
+        default: "."
+      dockerfile:
+        description: Dockerfile, relative to the repo root. Defaults to <context>/Dockerfile.
+        type: string
+        default: ""
+      target:
+        description: Build stage to stop at. Defaults to the last one.
+        type: string
+        default: ""
+      build-args:
+        description: Build arguments, one KEY=value per line.
+        type: string
+        default: ""
+      platforms:
+        description: Comma-separated platforms, e.g. linux/amd64,linux/arm64.
+        type: string
+        default: linux/amd64
+      timeout-minutes:
+        type: number
+        default: 30
+    outputs:
+      image:
+        description: The image's name, without a tag (ghcr.io/<owner>/<image>).
+        value: ${{ jobs.build.outputs.image }}
+      digest:
+        description: The built image's digest (only pushed outside PRs).
+        value: ${{ jobs.build.outputs.digest }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      # To push to GHCR.
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    env:
+      # PRs only check that the image builds. Everything else (pushes to
+      # branches, tags, manual and scheduled runs) publishes it.
+      PUSH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Image name
+        id: name
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE: ${{ inputs.image || github.event.repository.name }}
+        run: |
+          # GHCR only accepts lowercase names.
+          image="ghcr.io/${OWNER,,}/${IMAGE,,}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Image: $image"
+
+      - uses: docker/setup-qemu-action@v4
+        if: inputs.platforms != 'linux/amd64'
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        if: env.PUSH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.name.outputs.image }}
+          # latest tracks the default branch, so a server can pull it to
+          # deploy main. sha-<commit> pins an exact build, and v1.2.3 tags
+          # give 1.2.3 and 1.2.
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          build-args: ${{ inputs.build-args }}
+          platforms: ${{ inputs.platforms }}
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          # Includes org.opencontainers.image.source, which links the package
+          # to the repo, so it takes the repo's visibility and access.
+          labels: ${{ steps.meta.outputs.labels }}
+          # Scoped per image, so repos that build several don't overwrite
+          # each other's layer cache.
+          cache-from: type=gha,scope=${{ steps.name.outputs.image }}
+          cache-to: type=gha,mode=max,scope=${{ steps.name.outputs.image }}
