@@ -1,0 +1,190 @@
+# Reusable workflow: run a repo's Playwright tests in the official Playwright
+# image, and keep its visual snapshots up to date from CI.
+#
+# Call it from another repo with:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#
+#   jobs:
+#     e2e:
+#       uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1
+#       permissions:
+#         contents: write
+#         actions: write
+#       with:
+#         working-directory: web
+#         snapshot-path: web/e2e/__screenshots__
+name: Playwright
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding package.json, package-lock.json and the Playwright config.
+        type: string
+        required: true
+      snapshot-path:
+        description: >-
+          Committed visual snapshots, relative to the repo root. When set, PRs
+          from this repo's own branches regenerate them and commit any that
+          changed. Leave empty to only compare.
+        type: string
+        default: ""
+      node-version:
+        type: string
+        default: "26"
+      image-flavor:
+        description: Ubuntu release of the Playwright image (resolute, noble, ...). Snapshots render differently on each.
+        type: string
+        default: resolute
+      go-version-file:
+        description: Set up Go from this go.mod first, for suites whose web servers run Go.
+        type: string
+        default: ""
+      setup:
+        description: >-
+          Shell run from the repo root before the tests. Export variables for
+          the tests by appending to $GITHUB_ENV.
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    # The image must match the installed @playwright/test exactly (it only
+    # has that version's browsers), so take the tag from the lockfile rather
+    # than pinning it anywhere that nothing keeps in step.
+    name: Playwright image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.version.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The same commit the tests run on.
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || '' }}
+          sparse-checkout: ${{ inputs.working-directory }}/package-lock.json
+          sparse-checkout-cone-mode: false
+      - id: version
+        env:
+          LOCKFILE: ${{ inputs.working-directory }}/package-lock.json
+          FLAVOR: ${{ inputs.image-flavor }}
+        run: |
+          version=$(jq -r '.packages["node_modules/@playwright/test"].version // empty' "$LOCKFILE")
+          if [ -z "$version" ]; then
+            echo "::error file=$LOCKFILE::@playwright/test is not in the lockfile"
+            exit 1
+          fi
+          echo "image=mcr.microsoft.com/playwright:v$version-$FLAVOR" >> "$GITHUB_OUTPUT"
+
+  e2e:
+    name: Playwright
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # Playwright's own image already has the browsers and their system
+    # libraries, so the job doesn't depend on reaching Ubuntu's apt mirrors.
+    container:
+      image: ${{ needs.image.outputs.image }}
+      options: --ipc=host
+    permissions:
+      # To commit updated snapshots back to the PR branch...
+      contents: write
+      # ...and re-run the calling workflow on that commit.
+      actions: write
+    env:
+      # PRs from this repo's own branches (including Renovate's) regenerate
+      # visual snapshots and commit any that changed, so UI changes show up
+      # as image diffs in the PR. Everything else (main, scheduled and manual
+      # runs, PRs from forks, which can't be pushed to) compares against the
+      # committed snapshots and fails on a difference.
+      UPDATE_SNAPSHOTS: ${{ inputs.snapshot-path != '' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The PR branch itself (not the merge commit), so snapshots can be
+          # committed back to it.
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || '' }}
+      - uses: actions/setup-go@v7
+        if: inputs.go-version-file != ''
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+          cache-dependency-path: "**/go.sum"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+      - name: Setup
+        if: inputs.setup != ''
+        shell: bash
+        run: ${{ inputs.setup }}
+      - run: npm ci --no-audit --no-fund
+        working-directory: ${{ inputs.working-directory }}
+      - name: Playwright tests
+        run: npx playwright test ${{ env.UPDATE_SNAPSHOTS == 'true' && '--update-snapshots=changed' || '' }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CI: true
+      - name: Commit updated snapshots
+        id: commit
+        if: env.UPDATE_SNAPSHOTS == 'true'
+        env:
+          SNAPSHOT_PATH: ${{ inputs.snapshot-path }}
+        run: |
+          # The workspace is owned by the runner user, not the container's root.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git add -A -- "$SNAPSHOT_PATH"
+          if git diff --cached --quiet; then
+            echo "Visual snapshots unchanged."
+            exit 0
+          fi
+          git diff --cached --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update visual snapshots"
+          git push origin "HEAD:$GITHUB_HEAD_REF"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Visual snapshots updated::UI screenshots changed; review the image diffs in the PR's Files changed tab."
+      - name: Re-run checks on the snapshot commit
+        # A push made with GITHUB_TOKEN doesn't trigger workflows, so the
+        # commit above would sit at the PR's head with no checks. A manual
+        # dispatch is the exception: it runs the calling workflow on the
+        # branch, attaching checks to that commit and comparing against the
+        # snapshots just committed, which proves they're stable.
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module -e '
+            const { GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_WORKFLOW_REF, GITHUB_HEAD_REF, GITHUB_TOKEN } = process.env
+            // owner/repo/.github/workflows/test.yml@refs/... -> test.yml
+            const workflow = GITHUB_WORKFLOW_REF.split("@")[0].split("/").pop()
+            const res = await fetch(`${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/dispatches`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
+              body: JSON.stringify({ ref: GITHUB_HEAD_REF }),
+            })
+            if (!res.ok) {
+              console.log(`::error::Could not dispatch ${workflow} on ${GITHUB_HEAD_REF} (${res.status}): ${await res.text()}. Does it have a workflow_dispatch trigger, and the actions: write permission?`)
+              process.exit(1)
+            }
+            console.log(`Dispatched ${workflow} on ${GITHUB_HEAD_REF}.`)
+          '
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            ${{ inputs.working-directory }}/playwright-report/
+            ${{ inputs.working-directory }}/test-results/
+          retention-days: 14
