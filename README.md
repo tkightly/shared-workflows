@@ -44,18 +44,17 @@ browsers always match and nothing needs installing.
 With `snapshot-path` set, PRs from the repo's own branches (Renovate's
 included) run with `--update-snapshots=changed` and commit any changed
 screenshots back to the branch as `github-actions[bot]`, so UI changes show up
-as image diffs in the PR. That commit can't trigger CI by itself, so the
-workflow marks the commit `[skip ci]` (otherwise GitHub creates a
-`pull_request` run for it that waits for approval forever) and dispatches the
-calling workflow on the branch instead. That attaches
-checks to the new head and re-runs the suite in compare mode against the
-snapshots it just committed. Everything else (pushes to main, scheduled and
-manual runs, fork PRs) compares against the committed snapshots and fails on a
-difference. On failure the HTML report and test results are uploaded.
+as image diffs in the PR. That push can't run workflows itself (GitHub creates
+a run for it that waits for approval and never starts; ignore it), so the job
+then re-runs the suite against the snapshots it just committed, which catches
+flaky screenshots, and reports the result as a `Playwright snapshots` commit
+status on the new commit, which shows on the PR. Everything else (pushes to
+main, scheduled runs, fork PRs) compares against the committed snapshots and
+fails on a difference. On failure the HTML report and test results are
+uploaded.
 
-The caller needs a `workflow_dispatch` trigger, and the calling job needs
-`contents: write` and `actions: write`. Don't put `concurrency` on the calling
-job; keep it at the caller's workflow level.
+The calling job needs `contents: write` and `statuses: write`. Don't put
+`concurrency` on the calling job; keep it at the caller's workflow level.
 
 | Input | Default | |
 |---|---|---|
@@ -72,14 +71,13 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
   e2e:
     uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1
     permissions:
       contents: write
-      actions: write
+      statuses: write
     with:
       working-directory: web
       snapshot-path: web/e2e/__screenshots__

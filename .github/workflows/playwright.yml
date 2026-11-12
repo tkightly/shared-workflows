@@ -3,18 +3,12 @@
 #
 # Call it from another repo with:
 #
-#   on:
-#     pull_request:
-#     push:
-#       branches: [main]
-#     workflow_dispatch:
-#
 #   jobs:
 #     e2e:
 #       uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1
 #       permissions:
 #         contents: write
-#         actions: write
+#         statuses: write
 #       with:
 #         working-directory: web
 #         snapshot-path: web/e2e/__screenshots__
@@ -99,14 +93,14 @@ jobs:
     permissions:
       # To commit updated snapshots back to the PR branch...
       contents: write
-      # ...and re-run the calling workflow on that commit.
-      actions: write
+      # ...and report the check of that commit on it.
+      statuses: write
     env:
       # PRs from this repo's own branches (including Renovate's) regenerate
       # visual snapshots and commit any that changed, so UI changes show up
-      # as image diffs in the PR. Everything else (main, scheduled and manual
-      # runs, PRs from forks, which can't be pushed to) compares against the
-      # committed snapshots and fails on a difference.
+      # as image diffs in the PR. Everything else (main, scheduled runs, PRs
+      # from forks, which can't be pushed to) compares against the committed
+      # snapshots and fails on a difference.
       UPDATE_SNAPSHOTS: ${{ inputs.snapshot-path != '' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v7
@@ -151,37 +145,48 @@ jobs:
           git diff --cached --stat
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # [skip ci]: the push would otherwise start a pull_request run that
-          # sits at "action required" (actor github-actions[bot]) and never
-          # runs. Skip instructions don't apply to the dispatch below.
-          git commit -m "Update visual snapshots [skip ci]"
+          git commit -m "Update visual snapshots"
           git push origin "HEAD:$GITHUB_HEAD_REF"
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "::notice title=Visual snapshots updated::UI screenshots changed; review the image diffs in the PR's Files changed tab."
-      - name: Re-run checks on the snapshot commit
-        # A push made with GITHUB_TOKEN doesn't trigger workflows, so the
-        # commit above would sit at the PR's head with no checks. A manual
-        # dispatch is the exception: it runs the calling workflow on the
-        # branch, attaching checks to that commit and comparing against the
-        # snapshots just committed, which proves they're stable.
-        if: steps.commit.outputs.pushed == 'true'
+      - name: Compare against the committed snapshots
+        # A push made with GITHUB_TOKEN doesn't run workflows on the new
+        # commit (it gets a run stuck at "action required" instead), so
+        # check it here: a screenshot that differs from the one just
+        # committed is flaky, and would fail on main.
+        id: recheck
+        if: steps.commit.outputs.sha != ''
+        run: npx playwright test
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CI: true
+      - name: Report on the snapshot commit
+        # As a commit status, which unlike checks from other events shows on
+        # the PR, so its head isn't left without a result.
+        if: always() && steps.commit.outputs.sha != ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          OUTCOME: ${{ steps.recheck.outcome }}
+          TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           node --input-type=module -e '
-            const { GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_WORKFLOW_REF, GITHUB_HEAD_REF, GITHUB_TOKEN } = process.env
-            // owner/repo/.github/workflows/test.yml@refs/... -> test.yml
-            const workflow = GITHUB_WORKFLOW_REF.split("@")[0].split("/").pop()
-            const res = await fetch(`${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/dispatches`, {
+            const { GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_TOKEN, SHA, OUTCOME, TARGET_URL } = process.env
+            const ok = OUTCOME === "success"
+            const res = await fetch(`${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/statuses/${SHA}`, {
               method: "POST",
               headers: { Authorization: `Bearer ${GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
-              body: JSON.stringify({ ref: GITHUB_HEAD_REF }),
+              body: JSON.stringify({
+                context: "Playwright snapshots",
+                state: ok ? "success" : "failure",
+                description: ok ? "Tests pass against the updated snapshots" : "Tests fail against the updated snapshots",
+                target_url: TARGET_URL,
+              }),
             })
             if (!res.ok) {
-              console.log(`::error::Could not dispatch ${workflow} on ${GITHUB_HEAD_REF} (${res.status}): ${await res.text()}. Does it have a workflow_dispatch trigger, and the actions: write permission?`)
+              console.log(`::error::Could not set a status on ${SHA} (${res.status}): ${await res.text()}`)
               process.exit(1)
             }
-            console.log(`Dispatched ${workflow} on ${GITHUB_HEAD_REF}.`)
           '
       - uses: actions/upload-artifact@v7
         if: failure()
