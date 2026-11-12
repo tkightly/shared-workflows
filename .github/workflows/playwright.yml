@@ -151,7 +151,10 @@ jobs:
           git diff --cached --stat
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Update visual snapshots"
+          # [skip ci]: the push would otherwise start a pull_request run that
+          # sits at "action required" (actor github-actions[bot]) and never
+          # runs. Skip instructions don't apply to the dispatch below.
+          git commit -m "Update visual snapshots [skip ci]"
           git push origin "HEAD:$GITHUB_HEAD_REF"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "::notice title=Visual snapshots updated::UI screenshots changed; review the image diffs in the PR's Files changed tab."

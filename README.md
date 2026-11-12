@@ -45,7 +45,9 @@ With `snapshot-path` set, PRs from the repo's own branches (Renovate's
 included) run with `--update-snapshots=changed` and commit any changed
 screenshots back to the branch as `github-actions[bot]`, so UI changes show up
 as image diffs in the PR. That commit can't trigger CI by itself, so the
-workflow then dispatches the calling workflow on the branch. That attaches
+workflow marks the commit `[skip ci]` (otherwise GitHub creates a
+`pull_request` run for it that waits for approval forever) and dispatches the
+calling workflow on the branch instead. That attaches
 checks to the new head and re-runs the suite in compare mode against the
 snapshots it just committed. Everything else (pushes to main, scheduled and
 manual runs, fork PRs) compares against the committed snapshots and fails on a
