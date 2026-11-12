@@ -90,5 +90,77 @@ or run locally in the same image. Renovate needs
 (in `tkightly/renovate-config`), or it treats a branch with a snapshot commit
 as edited and stops updating it.
 
+## docker-image
+
+Builds a Docker image and pushes it to `ghcr.io/<owner>/<image>`, so servers
+pull a finished image instead of building it themselves. PRs only build the
+image, to check it still does. Pushes publish it, tagged:
+
+- `latest` from the default branch, which is what a server deploying main pulls
+- `sha-<commit>` for every build, to pin or roll back to an exact one
+- `<branch>` from other branches
+- `1.2.3` and `1.2` from `v1.2.3` git tags
+
+Layers are cached in the GitHub Actions cache, one scope per image. The image
+is labelled with its source repo, so GHCR links the package to the repo and
+it takes the repo's visibility: images from private repos are private.
+
+The calling job needs `packages: write`.
+
+| Input | Default | |
+|---|---|---|
+| `image` | repo name | Name under `ghcr.io/<owner>/`. Set it for repos with several images |
+| `context` | `.` | Build context, from the repo root |
+| `dockerfile` | `<context>/Dockerfile` | From the repo root |
+| `target` | last stage | |
+| `build-args` | `""` | One `KEY=value` per line |
+| `platforms` | `linux/amd64` | Anything else sets up QEMU, which is much slower |
+| `timeout-minutes` | `30` | |
+
+Outputs `image` (without a tag) and `digest`.
+
+```yaml
+name: Image
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  image:
+    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1
+    permissions:
+      contents: read
+      packages: write
+```
+
+For a repo with several images, use a matrix:
+
+```yaml
+jobs:
+  image:
+    strategy:
+      matrix:
+        include:
+          - { image: movie-tracker-api, context: backend }
+          - { image: movie-tracker-web, context: web }
+          - { image: movie-tracker-migrate, dockerfile: deploy/migrate/Dockerfile }
+    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image: ${{ matrix.image }}
+      context: ${{ matrix.context || '.' }}
+      dockerfile: ${{ matrix.dockerfile || '' }}
+```
+
+Then in the server's Compose file, replace `build:` with
+`image: ghcr.io/tkightly/<image>:latest`. Pulling a private image needs a
+classic token with only `read:packages`, as a `ghcr.io` registry in Arcane or
+via `docker login ghcr.io`.
+
 Callers pin `@v1`. Move the `v1` tag forward for compatible changes; cut `v2`
 for anything that could start failing repos that pass today.
