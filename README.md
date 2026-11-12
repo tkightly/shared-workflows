@@ -169,5 +169,15 @@ pushed, so a caller's pin always means the same code. Callers pin an exact
 version. Bump the patch for fixes, the minor for new workflows or inputs, and
 the major for anything that could start failing repos that pass today.
 
+Publish each version as a release from main, which creates its tag:
+
+```sh
+gh release create v1.2.0 --target main --generate-notes
+```
+
+The repo has immutable releases turned on, so GitHub locks a released tag
+against being moved or deleted. A tag pushed without a release isn't locked
+(tag rulesets need GitHub Pro on a private repo), so always release.
+
 `v1` is an older floating tag, frozen at `v1.0.0`. Repos still on it keep
 working; move them to an exact version when they're next touched.
