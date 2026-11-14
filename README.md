@@ -35,6 +35,28 @@ jobs:
     uses: tkightly/shared-workflows/.github/workflows/compose-config.yml@v1.1.0
 ```
 
+## go-test
+
+Unit tests for a Go module. Fails if `go mod tidy` would change `go.mod` or
+`go.sum`, then runs `go vet ./...` and `go test -race ./...`. Go's version is
+read from `go.mod`, and modules and the build cache are cached.
+
+| Input | Default | |
+|---|---|---|
+| `working-directory` | `.` | Holds `go.mod` |
+| `go-version-file` | `<working-directory>/go.mod` | |
+| `race` | `true` | Run with the race detector |
+| `test-flags` | `""` | Extra `go test` flags, e.g. `-short` or `-tags=integration` |
+| `timeout-minutes` | `15` | |
+
+```yaml
+jobs:
+  go:
+    uses: tkightly/shared-workflows/.github/workflows/go-test.yml@v1.2.0
+```
+
+For a repo with several modules, use a matrix over `working-directory`.
+
 ## playwright
 
 Runs a repo's Playwright tests inside the official `mcr.microsoft.com/playwright`
