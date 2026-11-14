@@ -1,0 +1,65 @@
+# Reusable workflow: check a Go module is tidy, vet it and run its unit tests.
+#
+# Call it from another repo with:
+#
+#   jobs:
+#     go:
+#       uses: tkightly/shared-workflows/.github/workflows/go-test.yml@v1.2.0
+name: Go test
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding go.mod, relative to the repo root.
+        type: string
+        default: "."
+      go-version-file:
+        description: File to read the Go version from. Defaults to <working-directory>/go.mod.
+        type: string
+        default: ""
+      race:
+        description: Run the tests with the race detector.
+        type: boolean
+        default: true
+      test-flags:
+        description: Extra flags for `go test`, e.g. -tags=integration or -short.
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 15
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go test
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ inputs.go-version-file || format('{0}/go.mod', inputs.working-directory) }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+      - name: go mod tidy
+        # Fails if go.mod or go.sum would change, e.g. a dependency added
+        # without updating them.
+        run: go mod tidy -diff
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        env:
+          RACE: ${{ inputs.race && '-race' || '' }}
+          TEST_FLAGS: ${{ inputs.test-flags }}
+        # Flags are deliberately word-split.
+        run: go test $RACE $TEST_FLAGS ./...
