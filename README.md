@@ -60,8 +60,13 @@ For a repo with several modules, use a matrix over `working-directory`.
 ## playwright
 
 Runs a repo's Playwright tests inside the official `mcr.microsoft.com/playwright`
-image, whose tag is read from the lockfile's `@playwright/test` version, so the
-browsers always match and nothing needs installing.
+image, so the browsers always match and nothing needs installing.
+
+Pass the image as `image`, pinned to the lockfile's `@playwright/test` version.
+The job fails early if the two differ, and `tkightly/renovate-config` bumps
+both in the same PR. Without `image`, an extra job reads the version from the
+lockfile first; it takes seconds but GitHub bills it as a whole minute on every
+run.
 
 With `snapshot-path` set, PRs from the repo's own branches (Renovate's
 included) run with `--update-snapshots=changed` and commit any changed
@@ -83,7 +88,8 @@ The calling job needs `contents: write` and `statuses: write`. Don't put
 | `working-directory` | (required) | Holds `package.json`, the lockfile and the Playwright config |
 | `snapshot-path` | `""` | Committed snapshots, from the repo root. Empty: only compare |
 | `node-version` | `26` | |
-| `image-flavor` | `resolute` | Ubuntu release of the image. Snapshots render differently on each, so keep any local Docker runs on the same one |
+| `image` | `""` | e.g. `mcr.microsoft.com/playwright:v1.65.0-resolute`. Must match `@playwright/test` in the lockfile. Empty: read it from the lockfile in an extra job |
+| `image-flavor` | `resolute` | Ubuntu release of the image when `image` is empty. Snapshots render differently on each, so keep any local Docker runs on the same one |
 | `go-version-file` | `""` | Set up Go first, for suites whose web servers run Go |
 | `setup` | `""` | Shell run from the repo root before the tests; export variables via `$GITHUB_ENV` |
 | `timeout-minutes` | `30` | |
@@ -96,13 +102,14 @@ on:
 
 jobs:
   e2e:
-    uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1.1.0
+    uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1.3.0
     permissions:
       contents: write
       statuses: write
     with:
       working-directory: web
       snapshot-path: web/e2e/__screenshots__
+      image: mcr.microsoft.com/playwright:v1.65.0-resolute
 ```
 
 The playwright config should treat `CI` as "rendering matches the baselines":

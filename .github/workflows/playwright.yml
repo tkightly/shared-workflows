@@ -5,13 +5,14 @@
 #
 #   jobs:
 #     e2e:
-#       uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1.1.0
+#       uses: tkightly/shared-workflows/.github/workflows/playwright.yml@v1.3.0
 #       permissions:
 #         contents: write
 #         statuses: write
 #       with:
 #         working-directory: web
 #         snapshot-path: web/e2e/__screenshots__
+#         image: mcr.microsoft.com/playwright:v1.65.0-resolute
 name: Playwright
 
 on:
@@ -31,8 +32,19 @@ on:
       node-version:
         type: string
         default: "26"
+      image:
+        description: >-
+          Playwright image to run in, e.g.
+          mcr.microsoft.com/playwright:v1.65.0-resolute. Its version must match
+          the lockfile's @playwright/test (the job fails if not); Renovate bumps
+          both in one PR. Empty: read the version from the lockfile in an extra
+          job, which is billed as a separate minute on every run.
+        type: string
+        default: ""
       image-flavor:
-        description: Ubuntu release of the Playwright image (resolute, noble, ...). Snapshots render differently on each.
+        description: >-
+          Ubuntu release of the Playwright image (resolute, noble, ...), used
+          when `image` is empty. Snapshots render differently on each.
         type: string
         default: resolute
       go-version-file:
@@ -56,8 +68,10 @@ jobs:
   image:
     # The image must match the installed @playwright/test exactly (it only
     # has that version's browsers), so take the tag from the lockfile rather
-    # than pinning it anywhere that nothing keeps in step.
+    # than pinning it anywhere that nothing keeps in step. Skipped when the
+    # caller pins the image itself.
     name: Playwright image
+    if: inputs.image == ''
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.version.outputs.image }}
@@ -83,12 +97,14 @@ jobs:
   e2e:
     name: Playwright
     needs: image
+    # Runs after the image job, or without it when the caller pins the image.
+    if: ${{ !cancelled() && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # Playwright's own image already has the browsers and their system
     # libraries, so the job doesn't depend on reaching Ubuntu's apt mirrors.
     container:
-      image: ${{ needs.image.outputs.image }}
+      image: ${{ inputs.image || needs.image.outputs.image }}
       options: --ipc=host
     permissions:
       # To commit updated snapshots back to the PR branch...
@@ -108,6 +124,27 @@ jobs:
           # The PR branch itself (not the merge commit), so snapshots can be
           # committed back to it.
           ref: ${{ github.event_name == 'pull_request' && github.head_ref || '' }}
+      - name: Check the pinned image matches @playwright/test
+        # The image only has its own version's browsers, so a mismatch would
+        # fail later with a confusing "browser not installed" error.
+        if: inputs.image != ''
+        shell: bash
+        env:
+          IMAGE: ${{ inputs.image }}
+          LOCKFILE: ${{ inputs.working-directory }}/package-lock.json
+        run: |
+          version=$(node -p 'require(process.argv[1]).packages["node_modules/@playwright/test"]?.version ?? ""' "$PWD/$LOCKFILE")
+          if [ -z "$version" ]; then
+            echo "::error file=$LOCKFILE::@playwright/test is not in the lockfile"
+            exit 1
+          fi
+          case "$IMAGE" in
+            *:v"$version"-*) echo "Image $IMAGE matches @playwright/test $version" ;;
+            *)
+              echo "::error::The image input ($IMAGE) doesn't match @playwright/test $version in $LOCKFILE. Set it to mcr.microsoft.com/playwright:v$version-<flavor>."
+              exit 1
+              ;;
+          esac
       - uses: actions/setup-go@v7
         if: inputs.go-version-file != ''
         with:
