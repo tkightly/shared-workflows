@@ -1,0 +1,57 @@
+# Reusable workflow: work out the next semver version from Conventional
+# Commits, keep a release PR open with the version bump and CHANGELOG, and
+# when that PR is merged, tag the release and publish it on GitHub.
+#
+# Call it from another repo on pushes to main:
+#
+#   on:
+#     push:
+#       branches: [main]
+#   jobs:
+#     release:
+#       uses: tkightly/shared-workflows/.github/workflows/release-please.yml@v1.4.0
+#       permissions:
+#         contents: write
+#         pull-requests: write
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: release-please config, relative to the repo root.
+        type: string
+        default: release-please-config.json
+      manifest-file:
+        description: release-please manifest (the current version of each package), relative to the repo root.
+        type: string
+        default: .release-please-manifest.json
+    outputs:
+      release_created:
+        description: '"true" if this run published a release.'
+        value: ${{ jobs.release-please.outputs.release_created }}
+      tag_name:
+        description: The published tag, e.g. v1.2.3. Empty if nothing was released.
+        value: ${{ jobs.release-please.outputs.tag_name }}
+      version:
+        description: The published version, e.g. 1.2.3. Empty if nothing was released.
+        value: ${{ jobs.release-please.outputs.version }}
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}
