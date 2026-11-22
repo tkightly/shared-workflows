@@ -57,6 +57,34 @@ jobs:
 
 For a repo with several modules, use a matrix over `working-directory`.
 
+## go-lint
+
+Static checks for a Go module: `golangci-lint run ./...` with the repo's own
+`.golangci.yml` (enable `gosec` there for security linting), then
+`govulncheck ./...`, which fails on known vulnerabilities the code can
+actually reach, including in the standard library. Go's version is read from
+`go.mod` and used exactly (`GOTOOLCHAIN=local`), so keep its `go` line on a
+patched release.
+
+| Input | Default | |
+|---|---|---|
+| `working-directory` | `.` | Holds `go.mod` |
+| `go-version-file` | `<working-directory>/go.mod` | |
+| `golangci-lint-version` | `v2.15.0` | |
+| `govulncheck-version` | `v1.9.0` | |
+| `timeout-minutes` | `15` | |
+
+```yaml
+jobs:
+  lint:
+    uses: tkightly/shared-workflows/.github/workflows/go-lint.yml@v1.4.0
+    with:
+      working-directory: api
+```
+
+Run it on a weekly `schedule` too, so newly published vulnerabilities fail the
+build even without code changes.
+
 ## playwright
 
 Runs a repo's Playwright tests inside the official `mcr.microsoft.com/playwright`

@@ -1,0 +1,65 @@
+# Reusable workflow: lint a Go module with golangci-lint (incl. gosec, using
+# the repo's own .golangci.yml) and check it for known vulnerabilities with
+# govulncheck.
+#
+# Call it from another repo with:
+#
+#   jobs:
+#     lint:
+#       uses: tkightly/shared-workflows/.github/workflows/go-lint.yml@v1.4.0
+name: Go lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory holding go.mod, relative to the repo root.
+        type: string
+        default: "."
+      go-version-file:
+        description: File to read the Go version from. Defaults to <working-directory>/go.mod.
+        type: string
+        default: ""
+      golangci-lint-version:
+        type: string
+        default: v2.15.0
+      govulncheck-version:
+        type: string
+        default: v1.9.0
+      timeout-minutes:
+        type: number
+        default: 15
+
+permissions:
+  contents: read
+
+env:
+  # Lint and scan with exactly the Go version from go.mod: govulncheck
+  # reports standard-library vulnerabilities for the toolchain it runs on.
+  GOTOOLCHAIN: local
+
+jobs:
+  lint:
+    name: Go lint
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ inputs.go-version-file || format('{0}/go.mod', inputs.working-directory) }}
+          cache-dependency-path: ${{ inputs.working-directory }}/go.sum
+
+      - name: golangci-lint
+        env:
+          VERSION: ${{ inputs.golangci-lint-version }}
+        run: go run "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$VERSION" run ./...
+
+      - name: govulncheck
+        env:
+          VERSION: ${{ inputs.govulncheck-version }}
+        run: go run "golang.org/x/vuln/cmd/govulncheck@$VERSION" ./...
