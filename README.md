@@ -156,7 +156,7 @@ image, to check it still does. Pushes publish it, tagged:
 - `latest` from the default branch, which is what a server deploying main pulls
 - `sha-<commit>` for every build, to pin or roll back to an exact one
 - `<branch>` from other branches
-- `1.2.3` and `1.2` from `v1.2.3` git tags
+- `1.2.3` and `1.2` from `v1.2.3` git tags, or from the `version` input
 
 Layers are cached in the GitHub Actions cache, one scope per image. The image
 is labelled with its source repo, so GHCR links the package to the repo and
@@ -171,6 +171,7 @@ The calling job needs `packages: write`.
 | `dockerfile` | `<context>/Dockerfile` | From the repo root |
 | `target` | last stage | |
 | `build-args` | `""` | One `KEY=value` per line |
+| `version` | `""` | Semver version to tag `1.2.3` and `1.2`, e.g. release-please's `tag_name`. Empty: only on `v*` tag runs |
 | `platforms` | `linux/amd64` | Anything else sets up QEMU, which is much slower |
 | `timeout-minutes` | `30` | |
 
@@ -275,9 +276,27 @@ jobs:
 The PRs, tags and releases are made with the workflow's `GITHUB_TOKEN`, and
 GitHub doesn't start workflows for events that token causes. So the release
 PR gets no CI checks (it only changes the changelog and version files), and
-pushing the tag doesn't start `on: push: tags` workflows. Where that matters,
-for example a `docker-image` build of `v*` tags, add a job that `needs` the
-release job and runs when its `release_created` output is `"true"`.
+pushing the tag doesn't start `on: push: tags` workflows. To publish versioned
+images, build them in the same workflow, passing the released version:
+
+```yaml
+jobs:
+  release:
+    uses: tkightly/shared-workflows/.github/workflows/release-please.yml@v1.5.0
+    permissions:
+      contents: write
+      pull-requests: write
+
+  image:
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    uses: tkightly/shared-workflows/.github/workflows/docker-image.yml@v1.5.0
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.release.outputs.tag_name }}
+```
 
 ## Versions
 
