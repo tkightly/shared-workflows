@@ -219,6 +219,66 @@ Then in the server's Compose file, replace `build:` with
 classic token with only `read:packages`, as a `ghcr.io` registry in Arcane or
 via `docker login ghcr.io`.
 
+## release-please
+
+Automates semver releases from [Conventional Commits](https://www.conventionalcommits.org/).
+On every push to main, [release-please](https://github.com/googleapis/release-please)
+works out the next version (`fix:` bumps the patch, `feat:` the minor and
+`feat!:` or a `BREAKING CHANGE:` footer the major) and opens or updates a
+release PR with that version and a `CHANGELOG.md`. When the PR is merged, the
+next run tags `vX.Y.Z` and publishes the GitHub release. Commits that don't
+follow the convention are left out of the changelog and don't bump anything.
+
+The caller keeps two files at the repo root:
+
+```jsonc
+// release-please-config.json
+{
+  "packages": {
+    ".": {
+      "release-type": "go",          // or "simple", "node", ...
+      "bump-minor-pre-major": true   // before 1.0.0, breaking changes bump the minor
+    }
+  }
+}
+```
+
+```jsonc
+// .release-please-manifest.json: the current version; release-please updates it
+{ ".": "0.0.0" }
+```
+
+To pick the first version explicitly, put `Release-As: 0.1.0` in a commit
+message footer.
+
+| Input | Default | |
+|---|---|---|
+| `config-file` | `release-please-config.json` | |
+| `manifest-file` | `.release-please-manifest.json` | |
+
+Outputs `release_created`, `tag_name` and `version`, so later jobs can run
+only when a release was published.
+
+```yaml
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    uses: tkightly/shared-workflows/.github/workflows/release-please.yml@v1.4.0
+    permissions:
+      contents: write
+      pull-requests: write
+```
+
+The PRs, tags and releases are made with the workflow's `GITHUB_TOKEN`, and
+GitHub doesn't start workflows for events that token causes. So the release
+PR gets no CI checks (it only changes the changelog and version files), and
+pushing the tag doesn't start `on: push: tags` workflows. Where that matters,
+for example a `docker-image` build of `v*` tags, add a job that `needs` the
+release job and runs when its `release_created` output is `"true"`.
+
 ## Versions
 
 Releases are semver tags (`v1.2.3`), and a tag is never moved or deleted once
@@ -226,15 +286,15 @@ pushed, so a caller's pin always means the same code. Callers pin an exact
 version. Bump the patch for fixes, the minor for new workflows or inputs, and
 the major for anything that could start failing repos that pass today.
 
-Publish each version as a release from main, which creates its tag:
-
-```sh
-gh release create v1.2.0 --target main --generate-notes
-```
+Releases are made by this repo's own `release-please` workflow
+(`.github/workflows/release.yml`), so commit messages follow Conventional
+Commits: `fix:` for fixes, `feat:` for new workflows or inputs, and `feat!:`
+for anything that could start failing repos that pass today. Merging the
+release PR it keeps open tags and publishes the version.
 
 The repo has immutable releases turned on, so GitHub locks a released tag
-against being moved or deleted. A tag pushed without a release isn't locked
-(tag rulesets need GitHub Pro on a private repo), so always release.
+against being moved or deleted. A tag pushed without a release isn't locked,
+so always release rather than pushing tags by hand.
 
 `v1` is an older floating tag, frozen at `v1.0.0`. Repos still on it keep
 working; move them to an exact version when they're next touched.
