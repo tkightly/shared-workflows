@@ -39,6 +39,13 @@ on:
         description: Build arguments, one KEY=value per line.
         type: string
         default: ""
+      version:
+        description: >-
+          Semver version to tag the image with (1.2.3 and 1.2), e.g. the
+          tag_name output of release-please. Empty: only when the run is for a
+          v1.2.3 git tag.
+        type: string
+        default: ""
       platforms:
         description: Comma-separated platforms, e.g. linux/amd64,linux/arm64.
         type: string
@@ -104,15 +111,15 @@ jobs:
         with:
           images: ${{ steps.name.outputs.image }}
           # latest tracks the default branch, so a server can pull it to
-          # deploy main. sha-<commit> pins an exact build, and v1.2.3 tags
-          # give 1.2.3 and 1.2.
+          # deploy main. sha-<commit> pins an exact build, and v1.2.3 (a git
+          # tag, or the version input) gives 1.2.3 and 1.2.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
             type=ref,event=branch
             type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ inputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
 
       - id: build
         uses: docker/build-push-action@v7
